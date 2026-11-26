@@ -1,0 +1,335 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Pillar 4.1: Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isHouseholdMember(householdId) {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    function isHouseholdOwner(householdId) {
+      return isVerifiedUser() &&
+        get(/databases/$(database)/documents/households/$(householdId)).data.ownerId == request.auth.uid;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'currency', 'notificationsEnabled', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'activeHouseholdId', 'currency', 'notificationsEnabled', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!('activeHouseholdId' in data) || (data.activeHouseholdId is string && data.activeHouseholdId.size() <= 128 && data.activeHouseholdId.matches('^[a-zA-Z0-9_\\-]*$')))
+        && data.currency in ['INR', 'USD', 'EUR', 'GBP']
+        && data.notificationsEnabled is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHousehold(data) {
+      return data.keys().hasAll(['name', 'inviteCode', 'currency', 'ownerId', 'bankBalance', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'inviteCode', 'currency', 'ownerId', 'bankBalance', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.inviteCode is string && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 12 && data.inviteCode.matches('^[A-Z0-9]+$')
+        && data.currency in ['INR', 'USD', 'EUR', 'GBP']
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.bankBalance is number && data.bankBalance >= -1000000000 && data.bankBalance <= 1000000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInvite(data) {
+      return data.keys().hasAll(['inviteCode', 'householdId', 'householdName', 'ownerId', 'createdAt'])
+        && data.keys().hasOnly(['inviteCode', 'householdId', 'householdName', 'ownerId', 'createdAt'])
+        && data.inviteCode is string && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 12 && data.inviteCode.matches('^[A-Z0-9]+$')
+        && isValidId(data.householdId)
+        && data.householdName is string && data.householdName.size() >= 1 && data.householdName.size() <= 80
+        && data.ownerId is string && data.ownerId == request.auth.uid && data.ownerId.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'joinedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'role', 'inviteCodeUsed', 'joinedAt'])
+        && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.role in ['owner', 'partner']
+        && (!('inviteCodeUsed' in data) || (data.inviteCodeUsed is string && data.inviteCodeUsed.size() <= 12 && data.inviteCodeUsed.matches('^[A-Z0-9]*$')))
+        && data.joinedAt is timestamp;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'kind', 'color', 'icon', 'budgetLimit', 'splitRatio', 'isTaxDeductibleDefault', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'kind', 'color', 'icon', 'budgetLimit', 'splitRatio', 'isTaxDeductibleDefault', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 50
+        && data.kind in ['expense', 'event', 'recurring', 'savings', 'fd', 'income']
+        && data.color is string && data.color.size() >= 4 && data.color.size() <= 9 && data.color.matches('^#[0-9a-fA-F]{3,8}$')
+        && data.icon is string && data.icon.size() >= 1 && data.icon.size() <= 32
+        && data.budgetLimit is number && data.budgetLimit >= 0 && data.budgetLimit <= 1000000000
+        && data.splitRatio is number && data.splitRatio >= 0 && data.splitRatio <= 100
+        && data.isTaxDeductibleDefault is bool
+        && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 && data.createdByUid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['title', 'amount', 'type', 'scope', 'categoryId', 'categoryName', 'date', 'paidByUid', 'paidByName', 'notes', 'isTaxDeductible', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'amount', 'type', 'scope', 'categoryId', 'categoryName', 'date', 'paidByUid', 'paidByName', 'notes', 'isTaxDeductible', 'recurringId', 'receiptSummary', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.amount is number && data.amount > 0 && data.amount <= 1000000000
+        && data.type in ['expense', 'income', 'savings', 'fd']
+        && data.scope in ['shared', 'personal']
+        && isValidId(data.categoryId)
+        && data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 50
+        && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && isValidId(data.paidByUid)
+        && data.paidByName is string && data.paidByName.size() >= 1 && data.paidByName.size() <= 60
+        && data.notes is string && data.notes.size() <= 400
+        && data.isTaxDeductible is bool
+        && (!('recurringId' in data) || (data.recurringId is string && data.recurringId.size() <= 128))
+        && (!('receiptSummary' in data) || (data.receiptSummary is string && data.receiptSummary.size() <= 300))
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRecurring(data) {
+      return data.keys().hasAll(['title', 'amount', 'frequency', 'type', 'scope', 'categoryId', 'categoryName', 'nextDueDate', 'ownerUid', 'ownerName', 'isTaxDeductible', 'isActive', 'notes', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'amount', 'frequency', 'type', 'scope', 'categoryId', 'categoryName', 'nextDueDate', 'ownerUid', 'ownerName', 'isTaxDeductible', 'isActive', 'notes', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.amount is number && data.amount > 0 && data.amount <= 1000000000
+        && data.frequency in ['weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly']
+        && data.type in ['expense', 'savings', 'fd']
+        && data.scope in ['shared', 'personal']
+        && isValidId(data.categoryId)
+        && data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 50
+        && data.nextDueDate is string && data.nextDueDate.size() == 10 && data.nextDueDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && isValidId(data.ownerUid)
+        && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 60
+        && data.isTaxDeductible is bool
+        && data.isActive is bool
+        && data.notes is string && data.notes.size() <= 300
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['kind', 'title', 'message', 'fromUid', 'fromName', 'readByUids', 'createdAt'])
+        && data.keys().hasOnly(['kind', 'title', 'message', 'fromUid', 'fromName', 'targetCategoryId', 'targetAmount', 'readByUids', 'createdAt'])
+        && data.kind in ['transaction_added', 'nudge', 'recurring_due', 'member_joined']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 300
+        && isValidId(data.fromUid)
+        && data.fromName is string && data.fromName.size() >= 1 && data.fromName.size() <= 60
+        && (!('targetCategoryId' in data) || (data.targetCategoryId is string && data.targetCategoryId.size() <= 128))
+        && (!('targetAmount' in data) || (data.targetAmount is number && data.targetAmount >= 0 && data.targetAmount <= 1000000000))
+        && data.readByUids is list && data.readByUids.size() <= 10
+        && (data.readByUids.size() == 0 || data.readByUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPushSubscription(data) {
+      return data.keys().hasAll(['uid', 'endpoint', 'p256dh', 'auth', 'deviceLabel', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'endpoint', 'p256dh', 'auth', 'deviceLabel', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.endpoint is string && data.endpoint.size() >= 16 && data.endpoint.size() <= 2048 && data.endpoint.matches('^https://.*')
+        && data.p256dh is string && data.p256dh.size() >= 20 && data.p256dh.size() <= 256
+        && data.auth is string && data.auth.size() >= 10 && data.auth.size() <= 128
+        && data.deviceLabel is string && data.deviceLabel.size() >= 1 && data.deviceLabel.size() <= 80
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Private User Profile (PII Isolation)
+    match /users/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isVerifiedUser() && isValidId(userId) && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(userId) && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoURL', 'activeHouseholdId', 'currency', 'notificationsEnabled', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Invite Code Lookup (Get-Only, No Listing)
+    match /householdInvites/{inviteCode} {
+      allow get: if isVerifiedUser() && isValidId(inviteCode);
+      allow list: if false;
+      allow create: if isVerifiedUser() && isValidId(inviteCode)
+        && isValidInvite(incoming())
+        && incoming().inviteCode == inviteCode
+        && incoming().createdAt == request.time
+        && getAfter(/databases/$(database)/documents/households/$(incoming().householdId)).data.ownerId == request.auth.uid;
+      allow update, delete: if isVerifiedUser() && isValidId(inviteCode) && existing().ownerId == request.auth.uid;
+    }
+
+    // Shared Household Workspace
+    match /households/{householdId} {
+      allow get: if isValidId(householdId) && isHouseholdMember(householdId);
+      allow list: if false;
+      allow create: if isVerifiedUser() && isValidId(householdId)
+        && isValidHousehold(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(householdId) && isHouseholdMember(householdId)
+        && isValidHousehold(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'currency', 'bankBalance', 'updatedAt'])
+          || (isHouseholdOwner(householdId) && incoming().diff(existing()).affectedKeys().hasOnly(['inviteCode', 'updatedAt']))
+        );
+      allow delete: if isValidId(householdId) && isHouseholdOwner(householdId);
+
+      // Members Subcollection
+      match /members/{memberId} {
+        allow get: if isValidId(householdId) && isValidId(memberId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isVerifiedUser() && isValidId(householdId) && isValidId(memberId)
+          && memberId == request.auth.uid
+          && isValidMember(incoming())
+          && incoming().joinedAt == request.time
+          && (
+            (incoming().role == 'owner' && getAfter(/databases/$(database)/documents/households/$(householdId)).data.ownerId == request.auth.uid)
+            || (incoming().role == 'partner'
+                && 'inviteCodeUsed' in incoming()
+                && exists(/databases/$(database)/documents/householdInvites/$(incoming().inviteCodeUsed))
+                && get(/databases/$(database)/documents/householdInvites/$(incoming().inviteCodeUsed)).data.householdId == householdId)
+          );
+        allow update: if isValidId(householdId) && isValidId(memberId) && isHouseholdMember(householdId)
+          && request.auth.uid == memberId
+          && isValidMember(incoming())
+          && incoming().uid == existing().uid
+          && incoming().role == existing().role
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']);
+        allow delete: if isValidId(householdId) && isValidId(memberId)
+          && (isHouseholdOwner(householdId) || request.auth.uid == memberId);
+      }
+
+      // Categories & Event Books Subcollection
+      match /categories/{categoryId} {
+        allow get: if isValidId(householdId) && isValidId(categoryId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isValidId(householdId) && isValidId(categoryId) && isHouseholdMember(householdId)
+          && isValidCategory(incoming())
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(householdId) && isValidId(categoryId) && isHouseholdMember(householdId)
+          && isValidCategory(incoming())
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'kind', 'color', 'icon', 'budgetLimit', 'splitRatio', 'isTaxDeductibleDefault', 'updatedAt']);
+        allow delete: if isValidId(householdId) && isValidId(categoryId) && isHouseholdMember(householdId);
+      }
+
+      // Transactions Subcollection
+      match /transactions/{txId} {
+        allow get: if isValidId(householdId) && isValidId(txId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isValidId(householdId) && isValidId(txId) && isHouseholdMember(householdId)
+          && isValidTransaction(incoming())
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(householdId) && isValidId(txId) && isHouseholdMember(householdId)
+          && isValidTransaction(incoming())
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'amount', 'type', 'scope', 'categoryId', 'categoryName', 'date', 'paidByUid', 'paidByName', 'notes', 'isTaxDeductible', 'receiptSummary', 'updatedAt']);
+        allow delete: if isValidId(householdId) && isValidId(txId) && isHouseholdMember(householdId);
+      }
+
+      // Recurring Obligations Subcollection
+      match /recurring/{recId} {
+        allow get: if isValidId(householdId) && isValidId(recId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isValidId(householdId) && isValidId(recId) && isHouseholdMember(householdId)
+          && isValidRecurring(incoming())
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(householdId) && isValidId(recId) && isHouseholdMember(householdId)
+          && isValidRecurring(incoming())
+          && incoming().createdByUid == existing().createdByUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'amount', 'frequency', 'type', 'scope', 'categoryId', 'categoryName', 'nextDueDate', 'ownerUid', 'ownerName', 'isTaxDeductible', 'isActive', 'notes', 'updatedAt']);
+        allow delete: if isValidId(householdId) && isValidId(recId) && isHouseholdMember(householdId);
+      }
+
+      // Notifications & Nudges Subcollection
+      match /notifications/{notifId} {
+        allow get: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId)
+          && isValidNotification(incoming())
+          && incoming().fromUid == request.auth.uid
+          && incoming().createdAt == request.time;
+        allow update: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId)
+          && isValidNotification(incoming())
+          && incoming().fromUid == existing().fromUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['readByUids']);
+        allow delete: if isValidId(householdId) && isValidId(notifId) && isHouseholdMember(householdId);
+      }
+
+      // Persisted Web Push Device Subscriptions Subcollection
+      match /pushSubscriptions/{subId} {
+        allow get: if isValidId(householdId) && isValidId(subId) && isHouseholdMember(householdId);
+        allow list: if isHouseholdMember(householdId);
+        allow create: if isValidId(householdId) && isValidId(subId) && isHouseholdMember(householdId)
+          && isValidPushSubscription(incoming())
+          && incoming().uid == request.auth.uid
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(householdId) && isValidId(subId) && isHouseholdMember(householdId)
+          && isValidPushSubscription(incoming())
+          && incoming().uid == request.auth.uid
+          && existing().uid == request.auth.uid
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['endpoint', 'p256dh', 'auth', 'deviceLabel', 'updatedAt']);
+        allow delete: if isValidId(householdId) && isValidId(subId) && isHouseholdMember(householdId);
+      }
+    }
+  }
+}

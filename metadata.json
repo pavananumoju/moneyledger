@@ -1,0 +1,8 @@
+{
+  "name": "MoneyLedger",
+  "description": "Real-time synced personal, couple, and shared event finance tracker across Android, iPhone, and desktop—featuring custom event books, recurring EMI/insurance cashflow projections, interactive charts, offline PWA support, tax export, and portable JSON backups.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

@@ -1,0 +1,12 @@
+{
+  "projectId": "gcp-nestledger",
+  "appId": "1:708375701797:web:f58a4836008778628a92cc",
+  "apiKey": "AIzaSyBfbaHKArMpyCbbdShcPVg0vf0Vql_6dsk",
+  "authDomain": "gcp-nestledger.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-6d07e6bf-f41e-41b6-bde1-f4c2e2979d64",
+  "storageBucket": "gcp-nestledger.firebasestorage.app",
+  "messagingSenderId": "708375701797",
+  "measurementId": "",
+  "oAuthClientId": "708375701797-j96ibktuc7orqjujptm4860tspoeh873.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}
